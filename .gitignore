@@ -58,5 +58,3 @@ wandb/
 logs/
 *.log
 runs/
-
-# claude --resume 07a3b7f8-956d-4a23-bd2b-47e7f4577835
