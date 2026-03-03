@@ -1,0 +1,52 @@
+# ============================================================
+# config/eval_config.yaml
+# Evaluation configuration for FID and CLIP scoring
+# ============================================================
+
+# ── Model ───────────────────────────────────────────────────
+model:
+  base_model: "runwayml/stable-diffusion-v1-5"
+  lora_weights_path: null   # path to evaluate with LoRA, or null for base model
+
+# ── Generation for Evaluation ────────────────────────────────
+generation:
+  num_images: 1000          # # of images to generate for FID computation
+  # WHY 1000? FID is computed between two distributions.
+  # Using <1000 images makes FID estimates noisy and unreliable.
+  # 5k+ gives very stable estimates but takes much longer.
+  batch_size: 4             # images per generation batch
+  num_inference_steps: 30
+  guidance_scale: 7.5
+  width: 512
+  height: 512
+  seed: 0                   # fixed for reproducibility
+  scheduler: "DPMSolverMultistepScheduler"
+  output_dir: "experiments/eval_generated"
+
+# ── FID Configuration ────────────────────────────────────────
+fid:
+  # cleanfid computes FID using Inception-v3 features
+  # It also fixes the common bug where images are resized differently
+  # between the real and generated sets.
+  real_images_dir: "dataset/val/images"  # ground truth images
+  generated_images_dir: "experiments/eval_generated"
+  mode: "clean"             # "clean" (recommended) | "legacy_pytorch" | "legacy_tensorflow"
+  model_name: "inception_v3"  # feature extractor; also available: "clip_vit_b_32"
+
+# ── CLIP Score Configuration ─────────────────────────────────
+clip:
+  model_name: "ViT-B/32"    # OpenCLIP model; also try "ViT-L/14" for higher accuracy
+  pretrained: "openai"      # weights source
+  batch_size: 32
+  # CLIP score = mean cosine similarity between text and image embeddings
+  # Range: [-1, 1]; typical good scores are 0.25-0.35 for SD1.5
+
+# ── Smoke Test ───────────────────────────────────────────────
+smoke_test:
+  num_images: 4             # just 4 images for quick verification
+  batch_size: 2
+
+# ── Output ───────────────────────────────────────────────────
+output:
+  metrics_dir: "experiments/metrics"
+  # Saved as: experiments/metrics/metrics_YYYYMMDD_HHMMSS.json

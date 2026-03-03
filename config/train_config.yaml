@@ -1,0 +1,100 @@
+# ============================================================
+# config/train_config.yaml
+# LoRA Fine-tuning Configuration for Stable Diffusion 1.5
+# ============================================================
+
+# ── Model ───────────────────────────────────────────────────
+model:
+  pretrained_model_name_or_path: "runwayml/stable-diffusion-v1-5"
+  # Hugging Face model ID. Change to a local path if you've downloaded it.
+  # e.g., "/home/user/.cache/huggingface/hub/models--runwayml--stable-diffusion-v1-5"
+  revision: null  # set to "fp16" to load fp16 variant directly
+  variant: null
+
+# ── LoRA Configuration ───────────────────────────────────────
+# WHY RANK 16?
+# LoRA (Low-Rank Adaptation) decomposes weight updates into two matrices:
+#   ΔW = B × A  where B ∈ R^{m×r} and A ∈ R^{r×n}
+# Rank r controls capacity:
+#   - r=4:  minimal parameters, good for style transfer with small datasets
+#   - r=16: sweet spot — captures enough variation for 5k+ diverse images
+#            while keeping VRAM under ~2GB extra and training stable
+#   - r=64: overkill unless you have 50k+ images or need high fidelity
+# For a 5k image fine-tune, r=16 consistently outperforms r=4 on CLIP scores
+# by ~3-5% while only adding ~30MB of adapter weights.
+lora:
+  rank: 16
+  lora_alpha: 16          # scaling factor; keeping equal to rank = no extra scaling
+  lora_dropout: 0.1       # dropout on LoRA layers to prevent overfitting
+  target_modules:         # which attention layers to apply LoRA to
+    - "to_q"              # query projection
+    - "to_k"              # key projection
+    - "to_v"              # value projection
+    - "to_out.0"          # output projection
+  bias: "none"            # "none" | "all" | "lora_only"
+
+# ── Dataset ─────────────────────────────────────────────────
+dataset:
+  train_data_dir: "dataset/train"
+  val_data_dir: "dataset/val"
+  image_column: "image"
+  caption_column: "caption"
+  resolution: 512         # training resolution (must match SD1.5's training res)
+  center_crop: true       # crop to resolution (vs. random crop)
+  random_flip: true       # horizontal flip augmentation
+  fallback_caption: "a high quality photo"  # if no caption file found
+
+# ── Training ─────────────────────────────────────────────────
+training:
+  output_dir: "lora_weights"
+  seed: 42
+  num_train_epochs: 10    # for 5k images; increase to 20-30 for small datasets
+  max_train_steps: null   # if set, overrides num_train_epochs
+  train_batch_size: 2     # start conservative; increase if VRAM allows
+  gradient_accumulation_steps: 4   # effective batch = 2 * 4 = 8
+  gradient_checkpointing: true     # saves ~30% VRAM at cost of ~20% speed
+
+  # Optimizer
+  optimizer: "adamw"
+  learning_rate: 1.0e-4   # typical for LoRA; lower than full fine-tuning
+  lr_scheduler: "cosine"  # "cosine" | "linear" | "constant" | "cosine_with_restarts"
+  lr_warmup_steps: 100
+  adam_beta1: 0.9
+  adam_beta2: 0.999
+  adam_weight_decay: 1.0e-2
+  adam_epsilon: 1.0e-8
+  max_grad_norm: 1.0
+
+  # Precision / Memory
+  mixed_precision: "fp16"  # "fp16" | "bf16" | "no"
+  # Note: bf16 is more numerically stable but requires Ampere GPU (RTX 30xx+)
+
+# ── Saving & Checkpointing ───────────────────────────────────
+checkpointing:
+  save_steps: 500          # save adapter checkpoint every N steps
+  checkpoints_total_limit: 5   # keep only last 5 checkpoints
+
+# ── Validation ──────────────────────────────────────────────
+validation:
+  validation_prompt: "a beautiful landscape painting in impressionist style"
+  num_validation_images: 4
+  validation_steps: 500    # run validation every N steps
+  validation_epochs: null  # alternative: run every N epochs
+
+# ── Logging ─────────────────────────────────────────────────
+logging:
+  logging_dir: "logs"
+  report_to: "tensorboard"   # "tensorboard" | "wandb" | "none"
+  wandb_project: "diffusion-lora"
+  log_interval: 50           # log metrics every N steps
+
+# ── Smoke Test Overrides ──────────────────────────────────────
+# When --smoke_test flag is passed, these override the above:
+smoke_test:
+  resolution: 256
+  num_train_epochs: 1
+  max_train_steps: 5
+  train_batch_size: 1
+  gradient_accumulation_steps: 1
+  save_steps: 5
+  validation_steps: 5

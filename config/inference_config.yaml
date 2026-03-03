@@ -1,0 +1,80 @@
+# ============================================================
+# config/inference_config.yaml
+# Default parameters for inference (txt2img, img2img, controlnet)
+# ============================================================
+
+# ── Model ───────────────────────────────────────────────────
+model:
+  base_model: "runwayml/stable-diffusion-v1-5"
+  controlnet_model: "lllyasviel/sd-controlnet-canny"
+  # Official Canny ControlNet for SD1.5 from lllyasviel (the ControlNet author)
+  lora_weights_path: null   # path to LoRA adapter dir, or null to skip
+
+# ── Performance / Precision ──────────────────────────────────
+performance:
+  device: "auto"            # "auto" → CUDA if available, else CPU
+  dtype: "fp16"             # "fp16" on GPU, "fp32" on CPU (auto-selected)
+  enable_xformers: true     # memory-efficient attention (needs xformers installed)
+  enable_torch_compile: false  # torch.compile — faster after warmup (Linux GPU only)
+  compile_mode: "reduce-overhead"  # "default" | "reduce-overhead" | "max-autotune"
+  attention_slicing: false  # alternative to xformers for low-VRAM; slower but universal
+  vae_slicing: true         # slice VAE to save VRAM during decode
+
+# ── Text-to-Image Defaults ───────────────────────────────────
+txt2img:
+  prompt: "a majestic mountain at sunset, photorealistic, 4k"
+  negative_prompt: "blurry, low quality, watermark, text, deformed"
+  width: 512
+  height: 512
+  num_inference_steps: 30   # "fast mode" uses 10
+  guidance_scale: 7.5       # CFG scale — how strictly to follow prompt
+  num_images_per_prompt: 1
+  seed: 42
+  scheduler: "DPMSolverMultistepScheduler"  # fast scheduler; also try EulerDiscreteScheduler
+
+# ── Image-to-Image Defaults ──────────────────────────────────
+img2img:
+  prompt: "a painting of this scene in Van Gogh style"
+  negative_prompt: "blurry, low quality, watermark"
+  strength: 0.75           # 0.0 = keep original; 1.0 = completely replace
+  num_inference_steps: 30
+  guidance_scale: 7.5
+  seed: 42
+  scheduler: "DPMSolverMultistepScheduler"
+
+# ── ControlNet (Canny) Defaults ──────────────────────────────
+controlnet:
+  prompt: "a detailed architectural drawing"
+  negative_prompt: "blurry, low quality, watermark"
+  num_inference_steps: 30
+  guidance_scale: 7.5
+  controlnet_conditioning_scale: 1.0  # how strongly to follow edges
+  # Canny edge detection params
+  canny_low_threshold: 100
+  canny_high_threshold: 200
+  seed: 42
+  scheduler: "DPMSolverMultistepScheduler"
+  width: 512
+  height: 512
+
+# ── Fast Mode (Gradio "Fast" checkbox) ───────────────────────
+fast_mode:
+  width: 512
+  height: 512
+  num_inference_steps: 10
+  guidance_scale: 5.0
+
+# ── Output ───────────────────────────────────────────────────
+output:
+  output_dir: "experiments/samples"
+  save_format: "png"
+
+# ── Available Schedulers ──────────────────────────────────────
+# These map to diffusers scheduler class names
+available_schedulers:
+  - "DPMSolverMultistepScheduler"   # DPM++ 2M — best quality/speed tradeoff
+  - "EulerDiscreteScheduler"         # Euler — fast, good general purpose
+  - "EulerAncestralDiscreteScheduler"  # Euler Ancestral — more variance/creativity
+  - "DDIMScheduler"                  # DDIM — classic deterministic
+  - "PNDMScheduler"                  # PNDM — original SD scheduler
+  - "HeunDiscreteScheduler"          # Heun — slower but high quality

@@ -1,0 +1,35 @@
+name: diffusion-gen
+channels:
+  - pytorch
+  - nvidia
+  - conda-forge
+  - defaults
+
+dependencies:
+  - python=3.10
+  - pip
+  # CUDA toolkit — change to your installed CUDA version if different
+  - pytorch::pytorch>=2.1.0
+  - pytorch::torchvision>=0.16.0
+  - pytorch::pytorch-cuda=11.8  # change to 12.1 if you have CUDA 12
+
+  - pip:
+    - diffusers>=0.27.0
+    - transformers>=4.38.0
+    - accelerate>=0.28.0
+    - peft>=0.10.0
+    - datasets>=2.18.0
+    - Pillow>=10.2.0
+    - opencv-python>=4.9.0
+    - numpy>=1.26.0
+    - clean-fid>=0.1.35
+    - open-clip-torch>=2.24.0
+    - gradio>=4.20.0
+    - wandb>=0.16.0
+    - tensorboard>=2.16.0
+    - omegaconf>=2.3.0
+    - PyYAML>=6.0.1
+    - tqdm>=4.66.0
+    - rich>=13.7.0
+    - pandas>=2.2.0
+    - pytest>=8.1.0

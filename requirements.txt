@@ -1,0 +1,48 @@
+# ============================================================
+# requirements.txt — Diffusion-Based Image Generation & Editing
+# Python 3.10+  |  CUDA 11.8 or 12.1 recommended
+# ============================================================
+
+# ── Core Deep Learning ──────────────────────────────────────
+torch>=2.1.0
+torchvision>=0.16.0
+torchaudio>=2.1.0
+
+# ── Hugging Face Ecosystem ──────────────────────────────────
+diffusers>=0.27.0
+transformers>=4.38.0
+accelerate>=0.28.0
+peft>=0.10.0          # LoRA via PEFT (Parameter-Efficient Fine-Tuning)
+datasets>=2.18.0       # optional: HF datasets for streaming large data
+
+# ── Image Processing ────────────────────────────────────────
+Pillow>=10.2.0
+opencv-python>=4.9.0   # canny edge detection for ControlNet
+numpy>=1.26.0
+
+# ── Evaluation ──────────────────────────────────────────────
+clean-fid>=0.1.35      # FID computation (cleanfid is cleaner than pytorch-fid)
+open-clip-torch>=2.24.0  # CLIP scores (OpenCLIP, more models than openai/clip)
+
+# ── Gradio UI ───────────────────────────────────────────────
+gradio>=4.20.0
+
+# ── Experiment Tracking & Logging ───────────────────────────
+wandb>=0.16.0          # optional: remove if not using W&B
+tensorboard>=2.16.0
+
+# ── Config & Utilities ──────────────────────────────────────
+omegaconf>=2.3.0       # YAML config with dot-notation access
+PyYAML>=6.0.1
+tqdm>=4.66.0
+rich>=13.7.0           # pretty terminal output
+pandas>=2.2.0          # latency CSV output
+
+# ── Optional Performance Boosters ───────────────────────────
+# xformers — install separately, must match your torch/CUDA version:
+#   pip install xformers  (or from wheel at https://github.com/facebookresearch/xformers)
+# triton — needed for torch.compile on GPU:
+#   pip install triton  (Linux only; skip on macOS)
+
+# ── Dev / Testing ───────────────────────────────────────────
+pytest>=8.1.0
