@@ -44,6 +44,24 @@ dataset:
   random_flip: true       # horizontal flip augmentation
   fallback_caption: "a high quality photo"  # if no caption file found
 
+# ── HuggingFace Dataset (WikiArt) ────────────────────────────
+# Set enabled: true to train on huggan/wikiart instead of local files.
+# First run downloads ~7GB to ~/.cache/huggingface/datasets/;
+# every subsequent run loads from that cache (instant).
+#
+# AVAILABLE STYLES in huggan/wikiart (approximate image counts):
+#   Impressionism (~13k)   Realism (~11k)   Romanticism (~7k)
+#   Expressionism (~6k)    Post_Impressionism (~6k)   Surrealism (~4k)
+#   Art_Nouveau_Modern     Symbolism   Cubism   Baroque   ...
+#
+# RECOMMENDATION: Start with "Impressionism" -- most images, most
+# distinctive visual identity, and produces the best demos.
+hf_dataset:
+  enabled: false                   # flip to true to use WikiArt
+  name: "huggan/wikiart"
+  style_filter: "Impressionism"    # null = train on ALL ~80k images
+  val_fraction: 0.05               # 5% held out as validation set
+
 # ── Training ─────────────────────────────────────────────────
 training:
   output_dir: "lora_weights"
@@ -76,7 +94,9 @@ checkpointing:
 
 # ── Validation ──────────────────────────────────────────────
 validation:
-  validation_prompt: "a beautiful landscape painting in impressionist style"
+  # Update this to match your training domain.
+  # For WikiArt Impressionism use a prompt in the same caption format:
+  validation_prompt: "an Impressionism painting, landscape, by Claude Monet"
   num_validation_images: 4
   validation_steps: 500    # run validation every N steps
   validation_epochs: null  # alternative: run every N epochs
@@ -98,3 +118,6 @@ smoke_test:
   gradient_accumulation_steps: 1
   save_steps: 5
   validation_steps: 5
+  # When using WikiArt (hf_dataset.enabled=true), only load this many
+  # samples so the smoke test doesn't download the full 7GB dataset.
+  hf_max_samples: 20

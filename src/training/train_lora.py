@@ -67,7 +67,7 @@ from PIL import Image
 from tqdm.auto import tqdm
 from transformers import CLIPTextModel, CLIPTokenizer
 
-from src.data.dataset import get_dataloader
+from src.data.dataset import get_dataloader, get_wikiart_dataloader
 from src.utils.logging_utils import get_logger, setup_logging, get_timestamped_filename
 from src.utils.seed_utils import seed_everything, seed_generator
 
@@ -305,17 +305,43 @@ def train(config: OmegaConf, smoke_test: bool = False) -> None:
     )
 
     # ── DataLoader ─────────────────────────────────────────────────────────
-    train_dataloader = get_dataloader(
-        data_dir=config.dataset.train_data_dir,
-        batch_size=config.training.train_batch_size,
-        resolution=config.dataset.resolution,
-        center_crop=config.dataset.center_crop,
-        random_flip=config.dataset.random_flip,
-        fallback_caption=config.dataset.fallback_caption,
-        tokenizer=tokenizer,
-        num_workers=min(4, os.cpu_count() or 1),
-        shuffle=True,
-    )
+    # Branch on whether we're using the local folder layout or HuggingFace
+    # datasets (WikiArt). Both paths produce identical DataLoader outputs
+    # so the training loop below doesn't need to change at all.
+    use_hf = getattr(config, "hf_dataset", None) and config.hf_dataset.get("enabled", False)
+
+    if use_hf:
+        logger.info(
+            f"Using HuggingFace dataset: {config.hf_dataset.name} "
+            f"(style={config.hf_dataset.get('style_filter', 'all')})"
+        )
+        max_samples = (
+            config.smoke_test.get("hf_max_samples", 20) if smoke_test else None
+        )
+        train_dataloader = get_wikiart_dataloader(
+            style_filter=config.hf_dataset.get("style_filter", "Impressionism"),
+            split="train",
+            val_fraction=config.hf_dataset.get("val_fraction", 0.05),
+            batch_size=config.training.train_batch_size,
+            resolution=config.dataset.resolution,
+            center_crop=config.dataset.center_crop,
+            random_flip=config.dataset.random_flip,
+            tokenizer=tokenizer,
+            num_workers=min(4, os.cpu_count() or 1),
+            max_samples=max_samples,
+        )
+    else:
+        train_dataloader = get_dataloader(
+            data_dir=config.dataset.train_data_dir,
+            batch_size=config.training.train_batch_size,
+            resolution=config.dataset.resolution,
+            center_crop=config.dataset.center_crop,
+            random_flip=config.dataset.random_flip,
+            fallback_caption=config.dataset.fallback_caption,
+            tokenizer=tokenizer,
+            num_workers=min(4, os.cpu_count() or 1),
+            shuffle=True,
+        )
 
     # ── Learning Rate Scheduler ────────────────────────────────────────────
     # WHY LR SCHEDULING?
