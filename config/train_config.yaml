@@ -65,6 +65,11 @@ hf_dataset:
   name: "huggan/wikiart"
   style_filter: "Impressionism"    # null = train on ALL ~80k images
   val_fraction: 0.05               # 5% held out as validation set
+  # Cap the training split at a fixed size. Impressionism has ~13k images;
+  # capping at 5000 keeps runs reproducible and bounded. The cap is applied
+  # AFTER the train/val split, so this is 5000 training images specifically.
+  # null = use every image matching style_filter.
+  max_samples: 5000
 
 # ── Training ─────────────────────────────────────────────────
 training:
@@ -72,9 +77,15 @@ training:
   seed: 42
   num_train_epochs: 10    # for 5k images; increase to 20-30 for small datasets
   max_train_steps: null   # if set, overrides num_train_epochs
-  train_batch_size: 2     # start conservative; increase if VRAM allows
-  gradient_accumulation_steps: 4   # effective batch = 2 * 4 = 8
-  gradient_checkpointing: true     # saves ~30% VRAM at cost of ~20% speed
+  # Effective batch is what matters for optimization: batch * accum = 8.
+  # On a big-VRAM GPU (H200/A100 80G) put it all in one real batch --
+  # identical training dynamics, but one forward/backward instead of four.
+  # On a ~10GB consumer card, use train_batch_size 2 + accumulation 4.
+  train_batch_size: 8
+  gradient_accumulation_steps: 1   # effective batch = 8 * 1 = 8
+  # Only worth enabling when VRAM-constrained: trades ~20% speed for ~30%
+  # less VRAM. Pointless on a 143GB H200 -- SD 1.5 at 512 uses a fraction.
+  gradient_checkpointing: false
 
   # Optimizer
   optimizer: "adamw"

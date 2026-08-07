@@ -373,9 +373,18 @@ def train(config: OmegaConf, smoke_test: bool = False) -> None:
             f"Using HuggingFace dataset: {config.hf_dataset.name} "
             f"(style={config.hf_dataset.get('style_filter', 'all')})"
         )
+        # Smoke tests cap hard so we never pull the full dataset. Real runs
+        # honour hf_dataset.max_samples, which is how the training set is
+        # pinned to a reproducible 5k rather than "however many images that
+        # style happens to have" (Impressionism alone is ~13k).
+        # null = use every image matching the style filter.
         max_samples = (
-            config.smoke_test.get("hf_max_samples", 20) if smoke_test else None
+            config.smoke_test.get("hf_max_samples", 20)
+            if smoke_test
+            else config.hf_dataset.get("max_samples", None)
         )
+        if max_samples is not None:
+            logger.info(f"Capping training set at {max_samples} samples")
         train_dataloader = get_wikiart_dataloader(
             style_filter=config.hf_dataset.get("style_filter", "Impressionism"),
             split="train",
