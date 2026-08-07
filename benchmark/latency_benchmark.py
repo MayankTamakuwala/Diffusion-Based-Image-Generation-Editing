@@ -53,6 +53,12 @@ import numpy as np
 import torch
 from tqdm.auto import tqdm
 
+# Running this file directly puts its own directory on sys.path, not the repo
+# root, so "from src...." would fail. Add the repo root before any src import.
+import sys as _sys
+from pathlib import Path as _Path
+_sys.path.insert(0, str(_Path(__file__).resolve().parents[1]))
+
 from src.utils.logging_utils import get_logger, setup_logging, get_timestamped_filename
 from src.utils.seed_utils import seed_generator
 

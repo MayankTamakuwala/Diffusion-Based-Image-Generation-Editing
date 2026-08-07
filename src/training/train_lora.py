@@ -67,6 +67,12 @@ from PIL import Image
 from tqdm.auto import tqdm
 from transformers import CLIPTextModel, CLIPTokenizer
 
+# Running this file directly puts its own directory on sys.path, not the repo
+# root, so "from src...." would fail. Add the repo root before any src import.
+import sys as _sys
+from pathlib import Path as _Path
+_sys.path.insert(0, str(_Path(__file__).resolve().parents[2]))
+
 from src.data.dataset import get_dataloader, get_wikiart_dataloader
 from src.utils.logging_utils import get_logger, setup_logging, get_timestamped_filename
 from src.utils.seed_utils import seed_everything, seed_generator
@@ -192,6 +198,35 @@ def make_validation_images(
         images_pil.append(Image.fromarray(img_np))
 
     return images_pil
+
+
+def flatten_config_for_tracker(cfg: dict, prefix: str = "") -> dict:
+    """
+    Flatten a nested config into scalars that experiment trackers accept.
+
+    WHY THIS IS NEEDED:
+    TensorBoard's add_hparams() only accepts int, float, str, bool, or Tensor.
+    Our config is nested and contains None (e.g. max_train_steps: null) and
+    lists (e.g. lora.target_modules), both of which raise:
+        ValueError: value should be one of int, float, str, bool, or torch.Tensor
+
+    So we flatten "training.learning_rate" -> one key, stringify lists and
+    None, and drop anything else that isn't representable.
+    """
+    flat = {}
+    for key, val in cfg.items():
+        name = f"{prefix}{key}"
+        if isinstance(val, dict):
+            flat.update(flatten_config_for_tracker(val, prefix=f"{name}."))
+        elif isinstance(val, (list, tuple)):
+            flat[name] = ", ".join(str(v) for v in val)
+        elif val is None:
+            flat[name] = "null"
+        elif isinstance(val, (int, float, str, bool)):
+            flat[name] = val
+        else:
+            flat[name] = str(val)
+    return flat
 
 
 def train(config: OmegaConf, smoke_test: bool = False) -> None:
@@ -382,10 +417,11 @@ def train(config: OmegaConf, smoke_test: bool = False) -> None:
 
     # ── Init Trackers ──────────────────────────────────────────────────────
     if accelerator.is_main_process:
-        run_name = f"lora_r{config.lora.rank}_lr{config.training.learning_rate}"
         accelerator.init_trackers(
             config.logging.get("wandb_project", "diffusion-lora"),
-            config=OmegaConf.to_container(config, resolve=True),
+            config=flatten_config_for_tracker(
+                OmegaConf.to_container(config, resolve=True)
+            ),
         )
 
     # ── Training Loop ──────────────────────────────────────────────────────
