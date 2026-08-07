@@ -327,7 +327,7 @@ def train(config: OmegaConf, smoke_test: bool = False) -> None:
             center_crop=config.dataset.center_crop,
             random_flip=config.dataset.random_flip,
             tokenizer=tokenizer,
-            num_workers=min(4, os.cpu_count() or 1),
+            num_workers=min(config.dataset.get("num_workers", 2), os.cpu_count() or 1),
             max_samples=max_samples,
         )
     else:
@@ -339,7 +339,7 @@ def train(config: OmegaConf, smoke_test: bool = False) -> None:
             random_flip=config.dataset.random_flip,
             fallback_caption=config.dataset.fallback_caption,
             tokenizer=tokenizer,
-            num_workers=min(4, os.cpu_count() or 1),
+            num_workers=min(config.dataset.get("num_workers", 2), os.cpu_count() or 1),
             shuffle=True,
         )
 

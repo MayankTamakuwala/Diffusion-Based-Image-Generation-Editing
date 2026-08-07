@@ -287,7 +287,11 @@ class WikiArtHFDataset(Dataset):
                     f"Available: {available}"
                 )
             logger.info(f"Filtering to style: '{style_filter}' (id={style_id})")
-            raw = raw.filter(lambda x: x["style"] == style_id, num_proc=4)
+            # num_proc=1: each extra process forks the parent and dirties
+            # copy-on-write pages, which spikes host RAM on memory-capped
+            # nodes. Filtering 80k rows is disk-bound anyway, so parallelism
+            # buys little here.
+            raw = raw.filter(lambda x: x["style"] == style_id, num_proc=1)
             logger.info(f"After filter: {len(raw)} images")
 
         # ── Train / Val split ──────────────────────────────────
