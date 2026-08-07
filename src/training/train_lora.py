@@ -153,12 +153,15 @@ def make_validation_images(
         # Start from pure noise latent (512x512 image → 64x64 latent, 4 channels)
         latent_h, latent_w = 64, 64  # 512 / 8 = 64
         generator = seed_generator(seed)
+        # Build the noise on CPU, then move. torch.randn rejects a CPU
+        # generator when device= is cuda ("Expected a 'cuda' device type for
+        # generator but found 'cpu'"), and seeding on CPU has the bonus that
+        # the same seed yields identical latents on any GPU model.
         latents = torch.randn(
             (num_images, 4, latent_h, latent_w),
             generator=generator,
-            device=device,
             dtype=dtype,
-        )
+        ).to(device)
 
         # Set up scheduler for inference
         noise_scheduler.set_timesteps(num_steps)
@@ -198,6 +201,21 @@ def make_validation_images(
         images_pil.append(Image.fromarray(img_np))
 
     return images_pil
+
+
+def resolve_weight_dtype(mixed_precision: str) -> torch.dtype:
+    """
+    Map Accelerate's mixed_precision setting to the dtype of the frozen models.
+
+    The VAE and text encoder are cast to this dtype, so anything fed to them
+    (latents, embeddings) must match or torch raises a dtype mismatch. Keep
+    this as the single source of truth -- computing it in two places is how
+    the bf16 path ended up silently producing float32 latents.
+    """
+    return {
+        "fp16": torch.float16,
+        "bf16": torch.bfloat16,
+    }.get(mixed_precision, torch.float32)
 
 
 def flatten_config_for_tracker(cfg: dict, prefix: str = "") -> dict:
@@ -406,11 +424,7 @@ def train(config: OmegaConf, smoke_test: bool = False) -> None:
     )
 
     # Move frozen models to device manually (Accelerator only handles trainable)
-    weight_dtype = torch.float32
-    if accelerator.mixed_precision == "fp16":
-        weight_dtype = torch.float16
-    elif accelerator.mixed_precision == "bf16":
-        weight_dtype = torch.bfloat16
+    weight_dtype = resolve_weight_dtype(accelerator.mixed_precision)
 
     text_encoder = text_encoder.to(accelerator.device, dtype=weight_dtype)
     vae = vae.to(accelerator.device, dtype=weight_dtype)
@@ -599,7 +613,7 @@ def _run_validation(
         tokenizer=tokenizer,
         noise_scheduler=val_scheduler,
         device=accelerator.device,
-        dtype=torch.float16 if accelerator.mixed_precision == "fp16" else torch.float32,
+        dtype=resolve_weight_dtype(accelerator.mixed_precision),
         prompt=config.validation.validation_prompt,
         num_images=config.validation.num_validation_images,
         num_steps=20,
