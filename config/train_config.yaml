@@ -75,7 +75,10 @@ hf_dataset:
 training:
   output_dir: "lora_weights"
   seed: 42
-  num_train_epochs: 10    # for 5k images; increase to 20-30 for small datasets
+  # 6 epochs over 5k images = 3750 optimizer steps at effective batch 8.
+  # LoRA on a single style converges well before 10 epochs -- only 3.2M of
+  # 862M params are trainable. Increase to 20-30 for small (<500 image) sets.
+  num_train_epochs: 6
   max_train_steps: null   # if set, overrides num_train_epochs
   # Effective batch is what matters for optimization: batch * accum = 8.
   # On a big-VRAM GPU (H200/A100 80G) put it all in one real batch --
