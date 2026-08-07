@@ -202,6 +202,221 @@ class ImageCaptionDataset(Dataset):
         return self.fallback_caption
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# WikiArt HuggingFace Dataset
+# ─────────────────────────────────────────────────────────────────────────────
+
+class WikiArtHFDataset(Dataset):
+    """
+    PyTorch Dataset that loads WikiArt from HuggingFace hub (huggan/wikiart).
+
+    WHY A SEPARATE CLASS INSTEAD OF REUSING ImageCaptionDataset?
+    The HF dataset returns PIL images and integer ClassLabel IDs in memory,
+    whereas ImageCaptionDataset reads from a local file-system tree.
+    The two sources need different __getitem__ logic, but share the same
+    transform pipeline -- so we duplicate only what differs.
+
+    CAPTION CONSTRUCTION:
+    WikiArt has no free-text captions. We synthesise them from metadata:
+        "an Impressionism painting, landscape, by Claude Monet"
+    This gives the text-encoder real semantic signal and lets you use
+    natural-language prompts at inference time, e.g.:
+        "an impressionism painting of a river at dusk, visible brushstrokes"
+
+    HOW THE HF DATASET IS LOADED:
+    1. load_dataset("huggan/wikiart") downloads and caches ~7GB the first time.
+    2. Subsequent runs are instant -- HF caches the Arrow files.
+    3. We filter by style AFTER loading (filter() is cached too).
+    4. We split train/val with a fixed seed for reproducibility.
+
+    Args:
+        style_filter: e.g. "Impressionism". None = use all ~80k images.
+        split: "train" or "val".
+        val_fraction: Fraction of data reserved for validation (default 5%).
+        resolution: Target square crop size.
+        center_crop: True = center crop; False = random crop.
+        random_flip: Horizontal flip augmentation.
+        tokenizer: If provided, also returns tokenised input_ids.
+        max_samples: Cap dataset size (useful for smoke tests).
+    """
+
+    def __init__(
+        self,
+        style_filter: str | None = "Impressionism",
+        split: str = "train",
+        val_fraction: float = 0.05,
+        resolution: int = 512,
+        center_crop: bool = True,
+        random_flip: bool = True,
+        tokenizer=None,
+        max_samples: int | None = None,
+    ):
+        try:
+            from datasets import load_dataset
+        except ImportError:
+            raise ImportError(
+                "HuggingFace datasets not installed. Run: pip install datasets"
+            )
+
+        self.resolution = resolution
+        self.tokenizer = tokenizer
+
+        logger.info(
+            "Loading huggan/wikiart from HuggingFace hub "
+            "(downloads ~7GB to HF cache on first run, instant thereafter)..."
+        )
+        raw = load_dataset("huggan/wikiart", split="train")
+
+        # HF ClassLabel stores integer IDs; .names gives the string list
+        # so self._style_names[sample["style"]] -> "Impressionism"
+        self._style_names = raw.features["style"].names
+        self._genre_names = raw.features["genre"].names
+        self._artist_names = raw.features["artist"].names  # e.g. "claude-monet"
+
+        # ── Filter by style ────────────────────────────────────
+        if style_filter is not None:
+            style_id = None
+            for i, name in enumerate(self._style_names):
+                if name.lower().replace("_", " ") == style_filter.lower().replace("_", " "):
+                    style_id = i
+                    break
+            if style_id is None:
+                available = ", ".join(self._style_names)
+                raise ValueError(
+                    f"Style '{style_filter}' not found in WikiArt.\n"
+                    f"Available: {available}"
+                )
+            logger.info(f"Filtering to style: '{style_filter}' (id={style_id})")
+            raw = raw.filter(lambda x: x["style"] == style_id, num_proc=4)
+            logger.info(f"After filter: {len(raw)} images")
+
+        # ── Train / Val split ──────────────────────────────────
+        # WikiArt only ships a single "train" split, so we carve out our
+        # own validation set with a fixed seed for reproducibility.
+        splits = raw.train_test_split(test_size=val_fraction, seed=42)
+        hf_split = splits["train"] if split == "train" else splits["test"]
+
+        if max_samples is not None:
+            hf_split = hf_split.select(range(min(max_samples, len(hf_split))))
+
+        self.data = hf_split
+        logger.info(f"WikiArtHFDataset [{split}]: {len(self.data)} samples")
+
+        # ── Same transform pipeline as ImageCaptionDataset ────
+        transform_list = []
+        if center_crop:
+            transform_list += [
+                transforms.Resize(resolution, interpolation=transforms.InterpolationMode.BILINEAR),
+                transforms.CenterCrop(resolution),
+            ]
+        else:
+            transform_list += [
+                transforms.Resize(resolution, interpolation=transforms.InterpolationMode.BILINEAR),
+                transforms.RandomCrop(resolution),
+            ]
+        if random_flip:
+            transform_list.append(transforms.RandomHorizontalFlip())
+        transform_list += [
+            transforms.ToTensor(),
+            transforms.Normalize([0.5], [0.5]),
+        ]
+        self.transform = transforms.Compose(transform_list)
+
+    def __len__(self) -> int:
+        return len(self.data)
+
+    def __getitem__(self, idx: int) -> dict:
+        sample = self.data[idx]
+
+        # HF datasets returns a PIL Image directly for Image-typed columns
+        try:
+            image = sample["image"].convert("RGB")
+        except Exception as e:
+            logger.warning(f"Failed to load WikiArt image at idx {idx}: {e}. Using blank.")
+            image = Image.new("RGB", (self.resolution, self.resolution), color=128)
+
+        pixel_values = self.transform(image)
+        caption = self._build_caption(sample)
+
+        result = {"pixel_values": pixel_values, "caption": caption}
+
+        if self.tokenizer is not None:
+            tokens = self.tokenizer(
+                caption,
+                max_length=self.tokenizer.model_max_length,
+                padding="max_length",
+                truncation=True,
+                return_tensors="pt",
+            )
+            result["input_ids"] = tokens.input_ids.squeeze(0)
+
+        return result
+
+    def _build_caption(self, sample: dict) -> str:
+        """
+        Synthesise a natural-language caption from WikiArt metadata.
+
+        Example output: "an Impressionism painting, landscape, by Claude Monet"
+
+        WHY THIS FORMAT?
+        Style token first so the text encoder anchors on it immediately.
+        Genre gives scene context for better compositional conditioning.
+        Artist name adds diversity across the 13k Impressionism images.
+        At inference you can use just "an impressionism painting of a sunset"
+        and the LoRA transfers the style even to novel compositions.
+        """
+        style = self._style_names[sample["style"]].replace("_", " ")
+        genre = self._genre_names[sample["genre"]].replace("_", " ")
+        # WikiArt stores artists as "claude-monet" -> title-case with spaces
+        artist = self._artist_names[sample["artist"]].replace("-", " ").title()
+        article = "an" if style[0].lower() in "aeiou" else "a"
+        return f"{article} {style} painting, {genre}, by {artist}"
+
+
+def get_wikiart_dataloader(
+    style_filter: str | None = "Impressionism",
+    split: str = "train",
+    val_fraction: float = 0.05,
+    batch_size: int = 4,
+    resolution: int = 512,
+    center_crop: bool = True,
+    random_flip: bool = True,
+    tokenizer=None,
+    num_workers: int = 4,
+    max_samples: int | None = None,
+) -> torch.utils.data.DataLoader:
+    """
+    Convenience wrapper: WikiArtHFDataset -> DataLoader.
+
+    HF datasets' Arrow backend is fork-safe, so multiple workers work
+    correctly without extra configuration.
+    """
+    dataset = WikiArtHFDataset(
+        style_filter=style_filter,
+        split=split,
+        val_fraction=val_fraction,
+        resolution=resolution,
+        center_crop=center_crop,
+        random_flip=random_flip,
+        tokenizer=tokenizer,
+        max_samples=max_samples,
+    )
+    dataloader = torch.utils.data.DataLoader(
+        dataset,
+        batch_size=batch_size,
+        shuffle=(split == "train"),
+        num_workers=num_workers,
+        pin_memory=True,
+        drop_last=True,
+        persistent_workers=num_workers > 0,
+    )
+    logger.info(
+        f"WikiArt DataLoader [{split}]: {len(dataset)} samples, "
+        f"{len(dataloader)} batches (batch_size={batch_size})"
+    )
+    return dataloader
+
+
 def get_dataloader(
     data_dir: str | Path,
     batch_size: int = 4,
