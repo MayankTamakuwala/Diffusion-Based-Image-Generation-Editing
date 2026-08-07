@@ -32,6 +32,11 @@ Thumbs.db
 *.onnx
 *.engine
 
+# Training run artifacts: checkpoint-N/, final_lora_adapter/ and the
+# validation image grids. The *.safetensors rule above already covers the
+# weights, but not the adapter_config.json or the sample PNGs beside them.
+lora_weights/
+
 # Hugging Face cache
 .cache/
 
