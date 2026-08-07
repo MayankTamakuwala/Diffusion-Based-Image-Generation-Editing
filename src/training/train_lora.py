@@ -188,7 +188,12 @@ def make_validation_images(
             # Step the scheduler
             latents = noise_scheduler.step(noise_pred, t, latents).prev_sample
 
-        # Decode latents to pixel space
+        # Decode latents to pixel space.
+        # Realign dtype first: schedulers (Euler especially) upcast the sample
+        # to float32 internally for precision, so what comes out of the loop
+        # no longer matches the VAE's weights. Decoding directly raises
+        # "Input type (float) and bias type (c10::BFloat16) should be the same".
+        latents = latents.to(vae.dtype)
         latents = latents / vae.config.scaling_factor
         images_tensor = vae.decode(latents).sample
 
