@@ -132,9 +132,13 @@ def run_evaluation(
     }
 
     # ── Step 1: Load Validation Prompts ───────────────────────────────────
-    logger.info("Loading validation prompts...")
+    # These must come from the SAME held-out set the FID reference images do.
+    # Evaluating an Impressionism model against dataset/val (synthetic
+    # smoke-test photos) measures nothing -- see docs/evaluation_methodology.
+    val_dir = config.get("eval_data", {}).get("val_dir", "dataset/wikiart_val")
+    logger.info(f"Loading validation prompts from: {val_dir}")
     prompts = load_val_prompts(
-        val_data_dir="dataset/val",
+        val_data_dir=val_dir,
         max_count=config.generation.num_images,
         fallback="a high quality photograph",
     )

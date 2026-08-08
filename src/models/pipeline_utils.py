@@ -188,6 +188,50 @@ def set_scheduler(pipe, scheduler_name: str) -> None:
     logger.debug(f"Scheduler set to: {scheduler_name}")
 
 
+def load_lora_into_pipeline(pipe, lora_weights_path: str | Path) -> None:
+    """
+    Attach LoRA weights to a pipeline, handling both on-disk formats.
+
+    WHY THIS ISN'T JUST pipe.load_lora_weights():
+      Our trainer wraps the UNet with PEFT's get_peft_model() and saves via
+      save_pretrained(), which writes:
+          adapter_config.json
+          adapter_model.safetensors
+      Diffusers' load_lora_weights() instead looks for
+      "pytorch_lora_weights.safetensors" by default and expects diffusers-
+      style key names, so pointing it at a PEFT adapter directory fails.
+
+    So: detect the format and take the matching path.
+      - PEFT adapter  -> PeftModel.from_pretrained() then merge_and_unload()
+      - diffusers/kohya -> pipe.load_lora_weights()
+
+    WHY merge_and_unload() FOR THE PEFT PATH:
+      It folds ΔW = B·A back into the base weights and returns a plain
+      UNet2DConditionModel. That keeps the pipeline free of a PeftModel
+      wrapper (which confuses code reaching for pipe.unet attributes) and
+      removes the extra per-layer matmuls, so inference is marginally faster.
+      The trade-off is you can no longer toggle the adapter off -- fine here,
+      since comparing base vs LoRA means loading two separate pipelines.
+
+    Args:
+        pipe: Any diffusers pipeline with a .unet attribute.
+        lora_weights_path: Directory holding the adapter.
+    """
+    lora_path = Path(lora_weights_path)
+    is_peft_adapter = (lora_path / "adapter_config.json").exists()
+
+    if is_peft_adapter:
+        from peft import PeftModel
+
+        logger.info(f"Loading PEFT adapter from: {lora_path}")
+        peft_unet = PeftModel.from_pretrained(pipe.unet, str(lora_path))
+        pipe.unet = peft_unet.merge_and_unload()
+        logger.info("PEFT adapter merged into UNet")
+    else:
+        logger.info(f"Loading diffusers-format LoRA from: {lora_path}")
+        pipe.load_lora_weights(str(lora_path))
+
+
 def load_txt2img_pipeline(
     model_id: str = "runwayml/stable-diffusion-v1-5",
     lora_weights_path: Optional[str] = None,
@@ -227,8 +271,7 @@ def load_txt2img_pipeline(
 
     # Load LoRA weights if provided
     if lora_weights_path and Path(lora_weights_path).exists():
-        logger.info(f"Loading LoRA weights from: {lora_weights_path}")
-        pipe.load_lora_weights(lora_weights_path)
+        load_lora_into_pipeline(pipe, lora_weights_path)
 
     set_scheduler(pipe, scheduler_name)
     apply_optimizations(
@@ -269,8 +312,7 @@ def load_img2img_pipeline(
     pipe = pipe.to(resolved_device)
 
     if lora_weights_path and Path(lora_weights_path).exists():
-        logger.info(f"Loading LoRA weights from: {lora_weights_path}")
-        pipe.load_lora_weights(lora_weights_path)
+        load_lora_into_pipeline(pipe, lora_weights_path)
 
     set_scheduler(pipe, scheduler_name)
     apply_optimizations(pipe, resolved_device, enable_xformers=enable_xformers, vae_slicing=vae_slicing)
@@ -332,8 +374,7 @@ def load_controlnet_pipeline(
     pipe = pipe.to(resolved_device)
 
     if lora_weights_path and Path(lora_weights_path).exists():
-        logger.info(f"Loading LoRA weights from: {lora_weights_path}")
-        pipe.load_lora_weights(lora_weights_path)
+        load_lora_into_pipeline(pipe, lora_weights_path)
 
     set_scheduler(pipe, scheduler_name)
     apply_optimizations(pipe, resolved_device, enable_xformers=enable_xformers, vae_slicing=vae_slicing)
