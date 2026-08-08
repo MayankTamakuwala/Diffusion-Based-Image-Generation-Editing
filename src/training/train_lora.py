@@ -373,9 +373,18 @@ def train(config: OmegaConf, smoke_test: bool = False) -> None:
             f"Using HuggingFace dataset: {config.hf_dataset.name} "
             f"(style={config.hf_dataset.get('style_filter', 'all')})"
         )
+        # Smoke tests cap hard so we never pull the full dataset. Real runs
+        # honour hf_dataset.max_samples, which is how the training set is
+        # pinned to a reproducible 5k rather than "however many images that
+        # style happens to have" (Impressionism alone is ~13k).
+        # null = use every image matching the style filter.
         max_samples = (
-            config.smoke_test.get("hf_max_samples", 20) if smoke_test else None
+            config.smoke_test.get("hf_max_samples", 20)
+            if smoke_test
+            else config.hf_dataset.get("max_samples", None)
         )
+        if max_samples is not None:
+            logger.info(f"Capping training set at {max_samples} samples")
         train_dataloader = get_wikiart_dataloader(
             style_filter=config.hf_dataset.get("style_filter", "Impressionism"),
             split="train",
@@ -460,7 +469,12 @@ def train(config: OmegaConf, smoke_test: bool = False) -> None:
 
     for epoch in range(first_epoch, num_epochs):
         unet.train()
+        # Running SUM of per-step loss, plus the count needed to turn it back
+        # into a mean at log time. Without the counter the logged number is
+        # log_interval times the true loss (~7.6 instead of ~0.15), and the
+        # first window of each epoch covers fewer steps than the rest.
         train_loss = 0.0
+        steps_since_log = 0
 
         for step, batch in enumerate(train_dataloader):
             # ── Forward Pass ──────────────────────────────────
@@ -517,6 +531,7 @@ def train(config: OmegaConf, smoke_test: bool = False) -> None:
                 # 9. Backpropagation (only LoRA params get gradients)
                 avg_loss = accelerator.gather(loss.repeat(bsz)).mean()
                 train_loss += avg_loss.item() / config.training.gradient_accumulation_steps
+                steps_since_log += 1
 
                 accelerator.backward(loss)
 
@@ -537,13 +552,14 @@ def train(config: OmegaConf, smoke_test: bool = False) -> None:
                 # Log metrics
                 if global_step % config.logging.log_interval == 0:
                     logs = {
-                        "train_loss": train_loss,
+                        "train_loss": train_loss / max(steps_since_log, 1),
                         "lr": lr_scheduler.get_last_lr()[0],
                         "epoch": epoch,
                     }
                     progress_bar.set_postfix(**{k: f"{v:.4f}" for k, v in logs.items()})
                     accelerator.log(logs, step=global_step)
                     train_loss = 0.0
+                    steps_since_log = 0
 
                 # Checkpoint
                 if global_step % config.checkpointing.save_steps == 0:
