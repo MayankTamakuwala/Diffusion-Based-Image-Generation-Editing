@@ -122,6 +122,7 @@ def run_evaluation(
         "model_info": {
             "base_model": config.model.base_model,
             "lora_path": config.model.lora_weights_path,
+            "lora_scale": config.model.get("lora_scale", 1.0),
             "num_inference_steps": config.generation.num_inference_steps,
             "guidance_scale": config.generation.guidance_scale,
             "scheduler": config.generation.scheduler,
@@ -161,6 +162,7 @@ def run_evaluation(
         output_dir=gen_dir,
         model_id=config.model.base_model,
         lora_path=config.model.lora_weights_path,
+        lora_scale=config.model.get("lora_scale", 1.0),
         num_steps=config.generation.num_inference_steps,
         guidance_scale=config.generation.guidance_scale,
         batch_size=config.generation.batch_size,

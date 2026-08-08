@@ -363,7 +363,12 @@ def run_scale_sweep(
     }
 
 
-def run_metric_comparison(config: OmegaConf, lora_path: str, smoke_test: bool) -> dict:
+def run_metric_comparison(
+    config: OmegaConf,
+    lora_path: str,
+    smoke_test: bool,
+    lora_scale: float = 1.0,
+) -> dict:
     """
     Run the full FID + CLIP evaluation for both arms against the same
     reference set, and return both sets of metrics plus the deltas.
@@ -375,6 +380,10 @@ def run_metric_comparison(config: OmegaConf, lora_path: str, smoke_test: bool) -
         logger.info(f"===== Evaluating arm: {arm_name} =====")
         arm_config = deepcopy(config)
         arm_config.model.lora_weights_path = arm_lora
+        # The base arm has no adapter, so strength is irrelevant there;
+        # the lora arm must carry the requested scale all the way down to
+        # the pipeline loader or it silently evaluates full strength.
+        arm_config.model.lora_scale = lora_scale if arm_lora else 1.0
         # Separate output dirs, or the second arm's FID would be computed
         # over a directory still holding the first arm's images.
         arm_config.generation.output_dir = f"experiments/eval_generated_{arm_name}"
@@ -452,7 +461,9 @@ def main():
         )
 
     if args.metrics:
-        results["metrics"] = run_metric_comparison(config, args.lora_path, args.smoke_test)
+        results["metrics"] = run_metric_comparison(
+            config, args.lora_path, args.smoke_test, lora_scale=args.lora_scale
+        )
 
     out_root = Path(args.output_dir)
     out_root.mkdir(parents=True, exist_ok=True)

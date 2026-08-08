@@ -138,6 +138,7 @@ def generate_images_for_fid(
     output_dir: str | Path,
     model_id: str = "runwayml/stable-diffusion-v1-5",
     lora_path: Optional[str] = None,
+    lora_scale: float = 1.0,
     num_steps: int = 30,
     guidance_scale: float = 7.5,
     batch_size: int = 4,
@@ -158,6 +159,9 @@ def generate_images_for_fid(
         output_dir: Where to save generated images.
         model_id: SD model.
         lora_path: Optional LoRA adapter.
+        lora_scale: Adapter strength, 0.0-1.0+. Must be threaded through
+            explicitly -- a silently-dropped scale produces a run that
+            looks correct but measures the wrong model.
         num_steps: Inference steps.
         guidance_scale: CFG scale.
         batch_size: Images per generation batch.
@@ -181,6 +185,7 @@ def generate_images_for_fid(
     pipe = load_txt2img_pipeline(
         model_id=model_id,
         lora_weights_path=lora_path,
+        lora_scale=lora_scale,
         device=device,
     )
 
