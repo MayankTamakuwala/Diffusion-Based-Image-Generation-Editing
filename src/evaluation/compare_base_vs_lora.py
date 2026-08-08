@@ -183,6 +183,7 @@ def run_visual_comparison(
     lora_path: str,
     num_samples: int = 6,
     output_dir: str | Path = "experiments/comparisons",
+    lora_scale: float = 1.0,
 ) -> dict:
     """
     Generate the side-by-side base vs LoRA grid.
@@ -222,6 +223,7 @@ def run_visual_comparison(
     lora_pipe = load_txt2img_pipeline(
         model_id=config.model.base_model,
         lora_weights_path=lora_path,
+        lora_scale=lora_scale,
         scheduler_name=config.generation.scheduler,
     )
     lora_images = _generate_with_pipeline(
@@ -243,6 +245,121 @@ def run_visual_comparison(
         "prompts": prompts,
         "seeds": seeds,
         "num_pairs": len(prompts),
+    }
+
+
+def build_sweep_grid(
+    columns: list[tuple[str, list[Image.Image]]],
+    prompts: list[str],
+    output_path: str | Path,
+) -> Path:
+    """
+    Compose an N-column contact sheet, one column per adapter strength.
+
+    Same layout idea as build_comparison_grid, generalised past two columns
+    so a strength sweep reads left-to-right from base to full strength.
+    """
+    if not columns or not columns[0][1]:
+        raise ValueError("No images to compose")
+
+    cell_w, cell_h = columns[0][1][0].size
+    n_rows = len(columns[0][1])
+    n_cols = len(columns)
+
+    grid = Image.new(
+        "RGB",
+        (cell_w * n_cols, cell_h * n_rows + LABEL_STRIP_PX),
+        color=(255, 255, 255),
+    )
+    draw = ImageDraw.Draw(grid)
+
+    for col, (label, images) in enumerate(columns):
+        draw.text((col * cell_w + cell_w // 2 - 30, 10), label, fill=(0, 0, 0))
+        for row, img in enumerate(images):
+            grid.paste(img, (col * cell_w, LABEL_STRIP_PX + row * cell_h))
+
+    out_path = Path(output_path)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    grid.save(out_path)
+
+    manifest = out_path.with_suffix(".txt")
+    manifest.write_text(
+        "columns: " + ", ".join(label for label, _ in columns) + "\n"
+        + "\n".join(f"row {i}: {p}" for i, p in enumerate(prompts)),
+        encoding="utf-8",
+    )
+    logger.info(f"Sweep grid saved: {out_path}")
+    return out_path
+
+
+def run_scale_sweep(
+    config: OmegaConf,
+    lora_path: str,
+    scales: list[float],
+    num_samples: int = 4,
+    output_dir: str | Path = "experiments/comparisons",
+) -> dict:
+    """
+    Render the same prompts/seeds at several adapter strengths.
+
+    WHY SWEEP STRENGTH BEFORE RETRAINING:
+      A style adapter at full strength often imposes palette and brushwork
+      hard enough to dissolve composition. That looks like "needs different
+      training" but is usually just too much adapter. Sweeping is minutes;
+      retraining is tens of minutes plus another evaluation pass.
+    """
+    from src.models.pipeline_utils import load_txt2img_pipeline
+
+    val_dir = config.get("eval_data", {}).get("val_dir", "dataset/wikiart_val")
+    prompts = load_eval_prompts(val_dir, num_samples)
+    seeds = [config.generation.seed + i for i in range(len(prompts))]
+
+    gen_kwargs = dict(
+        num_steps=config.generation.num_inference_steps,
+        guidance_scale=config.generation.guidance_scale,
+        width=config.generation.width,
+        height=config.generation.height,
+    )
+
+    columns: list[tuple[str, list[Image.Image]]] = []
+
+    # Base first, so the sweep reads as a progression from "no adapter".
+    logger.info("Loading BASE pipeline (no LoRA)...")
+    base_pipe = load_txt2img_pipeline(
+        model_id=config.model.base_model,
+        lora_weights_path=None,
+        scheduler_name=config.generation.scheduler,
+    )
+    columns.append(
+        ("base", _generate_with_pipeline(base_pipe, prompts, seeds, desc="base", **gen_kwargs))
+    )
+    _free(base_pipe)
+
+    for scale in scales:
+        logger.info(f"Loading LoRA pipeline at scale={scale}...")
+        # Reloaded per scale: merge_and_unload() bakes the delta into the
+        # weights irreversibly, so strength cannot be changed in place.
+        pipe = load_txt2img_pipeline(
+            model_id=config.model.base_model,
+            lora_weights_path=lora_path,
+            lora_scale=scale,
+            scheduler_name=config.generation.scheduler,
+        )
+        columns.append(
+            (f"scale {scale:g}",
+             _generate_with_pipeline(pipe, prompts, seeds, desc=f"scale {scale:g}", **gen_kwargs))
+        )
+        _free(pipe)
+
+    out_root = Path(output_dir)
+    grid_path = out_root / get_timestamped_filename("scale_sweep", ".png")
+    build_sweep_grid(columns, prompts, grid_path)
+
+    return {
+        "grid": str(grid_path),
+        "scales": scales,
+        "prompts": prompts,
+        "seeds": seeds,
     }
 
 
@@ -295,6 +412,12 @@ def main():
                         help="Also run FID + CLIP for both arms (slow)")
     parser.add_argument("--no_visual", action="store_true",
                         help="Skip the visual grid, metrics only")
+    parser.add_argument("--scale_sweep", type=float, nargs="+", default=None,
+                        metavar="SCALE",
+                        help="Render base plus these adapter strengths side by "
+                             "side, e.g. --scale_sweep 0.4 0.6 0.8 1.0")
+    parser.add_argument("--lora_scale", type=float, default=1.0,
+                        help="Adapter strength for the visual/metric arms (default 1.0)")
     parser.add_argument("--output_dir", type=str, default="experiments/comparisons")
     parser.add_argument("--smoke_test", action="store_true")
     args = parser.parse_args()
@@ -314,11 +437,18 @@ def main():
         "timestamp": datetime.now().isoformat(),
         "base_model": config.model.base_model,
         "lora_path": args.lora_path,
+        "lora_scale": args.lora_scale,
     }
 
-    if not args.no_visual:
+    if args.scale_sweep:
+        results["scale_sweep"] = run_scale_sweep(
+            config, args.lora_path, args.scale_sweep,
+            args.num_samples, args.output_dir,
+        )
+    elif not args.no_visual:
         results["visual"] = run_visual_comparison(
-            config, args.lora_path, args.num_samples, args.output_dir
+            config, args.lora_path, args.num_samples, args.output_dir,
+            lora_scale=args.lora_scale,
         )
 
     if args.metrics:
@@ -339,6 +469,12 @@ def main():
     if "visual" in results:
         print(f"\nGrid:        {results['visual']['grid']}")
         print(f"Pairs:       {results['visual']['num_pairs']} (matched seeds)")
+
+    if "scale_sweep" in results:
+        sw = results["scale_sweep"]
+        print(f"\nSweep grid:  {sw['grid']}")
+        print(f"Columns:     base, " + ", ".join(f"scale {s:g}" for s in sw['scales']))
+        print(f"Seeds:       {sw['seeds']} (shared across all columns)")
 
     if "metrics" in results:
         m = results["metrics"]
