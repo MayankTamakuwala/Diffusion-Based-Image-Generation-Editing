@@ -54,6 +54,12 @@ from PIL import Image
 import sys
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+# Running this file directly puts its own directory on sys.path, not the repo
+# root, so "from src...." would fail. Add the repo root before any src import.
+import sys as _sys
+from pathlib import Path as _Path
+_sys.path.insert(0, str(_Path(__file__).resolve().parents[1]))
+
 from src.models.pipeline_utils import (
     load_txt2img_pipeline,
     load_img2img_pipeline,

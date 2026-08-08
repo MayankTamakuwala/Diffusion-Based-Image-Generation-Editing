@@ -67,6 +67,12 @@ from PIL import Image
 from tqdm.auto import tqdm
 from transformers import CLIPTextModel, CLIPTokenizer
 
+# Running this file directly puts its own directory on sys.path, not the repo
+# root, so "from src...." would fail. Add the repo root before any src import.
+import sys as _sys
+from pathlib import Path as _Path
+_sys.path.insert(0, str(_Path(__file__).resolve().parents[2]))
+
 from src.data.dataset import get_dataloader, get_wikiart_dataloader
 from src.utils.logging_utils import get_logger, setup_logging, get_timestamped_filename
 from src.utils.seed_utils import seed_everything, seed_generator
@@ -147,12 +153,15 @@ def make_validation_images(
         # Start from pure noise latent (512x512 image → 64x64 latent, 4 channels)
         latent_h, latent_w = 64, 64  # 512 / 8 = 64
         generator = seed_generator(seed)
+        # Build the noise on CPU, then move. torch.randn rejects a CPU
+        # generator when device= is cuda ("Expected a 'cuda' device type for
+        # generator but found 'cpu'"), and seeding on CPU has the bonus that
+        # the same seed yields identical latents on any GPU model.
         latents = torch.randn(
             (num_images, 4, latent_h, latent_w),
             generator=generator,
-            device=device,
             dtype=dtype,
-        )
+        ).to(device)
 
         # Set up scheduler for inference
         noise_scheduler.set_timesteps(num_steps)
@@ -179,7 +188,12 @@ def make_validation_images(
             # Step the scheduler
             latents = noise_scheduler.step(noise_pred, t, latents).prev_sample
 
-        # Decode latents to pixel space
+        # Decode latents to pixel space.
+        # Realign dtype first: schedulers (Euler especially) upcast the sample
+        # to float32 internally for precision, so what comes out of the loop
+        # no longer matches the VAE's weights. Decoding directly raises
+        # "Input type (float) and bias type (c10::BFloat16) should be the same".
+        latents = latents.to(vae.dtype)
         latents = latents / vae.config.scaling_factor
         images_tensor = vae.decode(latents).sample
 
@@ -192,6 +206,50 @@ def make_validation_images(
         images_pil.append(Image.fromarray(img_np))
 
     return images_pil
+
+
+def resolve_weight_dtype(mixed_precision: str) -> torch.dtype:
+    """
+    Map Accelerate's mixed_precision setting to the dtype of the frozen models.
+
+    The VAE and text encoder are cast to this dtype, so anything fed to them
+    (latents, embeddings) must match or torch raises a dtype mismatch. Keep
+    this as the single source of truth -- computing it in two places is how
+    the bf16 path ended up silently producing float32 latents.
+    """
+    return {
+        "fp16": torch.float16,
+        "bf16": torch.bfloat16,
+    }.get(mixed_precision, torch.float32)
+
+
+def flatten_config_for_tracker(cfg: dict, prefix: str = "") -> dict:
+    """
+    Flatten a nested config into scalars that experiment trackers accept.
+
+    WHY THIS IS NEEDED:
+    TensorBoard's add_hparams() only accepts int, float, str, bool, or Tensor.
+    Our config is nested and contains None (e.g. max_train_steps: null) and
+    lists (e.g. lora.target_modules), both of which raise:
+        ValueError: value should be one of int, float, str, bool, or torch.Tensor
+
+    So we flatten "training.learning_rate" -> one key, stringify lists and
+    None, and drop anything else that isn't representable.
+    """
+    flat = {}
+    for key, val in cfg.items():
+        name = f"{prefix}{key}"
+        if isinstance(val, dict):
+            flat.update(flatten_config_for_tracker(val, prefix=f"{name}."))
+        elif isinstance(val, (list, tuple)):
+            flat[name] = ", ".join(str(v) for v in val)
+        elif val is None:
+            flat[name] = "null"
+        elif isinstance(val, (int, float, str, bool)):
+            flat[name] = val
+        else:
+            flat[name] = str(val)
+    return flat
 
 
 def train(config: OmegaConf, smoke_test: bool = False) -> None:
@@ -371,21 +429,18 @@ def train(config: OmegaConf, smoke_test: bool = False) -> None:
     )
 
     # Move frozen models to device manually (Accelerator only handles trainable)
-    weight_dtype = torch.float32
-    if accelerator.mixed_precision == "fp16":
-        weight_dtype = torch.float16
-    elif accelerator.mixed_precision == "bf16":
-        weight_dtype = torch.bfloat16
+    weight_dtype = resolve_weight_dtype(accelerator.mixed_precision)
 
     text_encoder = text_encoder.to(accelerator.device, dtype=weight_dtype)
     vae = vae.to(accelerator.device, dtype=weight_dtype)
 
     # ── Init Trackers ──────────────────────────────────────────────────────
     if accelerator.is_main_process:
-        run_name = f"lora_r{config.lora.rank}_lr{config.training.learning_rate}"
         accelerator.init_trackers(
             config.logging.get("wandb_project", "diffusion-lora"),
-            config=OmegaConf.to_container(config, resolve=True),
+            config=flatten_config_for_tracker(
+                OmegaConf.to_container(config, resolve=True)
+            ),
         )
 
     # ── Training Loop ──────────────────────────────────────────────────────
@@ -563,7 +618,7 @@ def _run_validation(
         tokenizer=tokenizer,
         noise_scheduler=val_scheduler,
         device=accelerator.device,
-        dtype=torch.float16 if accelerator.mixed_precision == "fp16" else torch.float32,
+        dtype=resolve_weight_dtype(accelerator.mixed_precision),
         prompt=config.validation.validation_prompt,
         num_images=config.validation.num_validation_images,
         num_steps=20,

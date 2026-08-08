@@ -68,6 +68,12 @@ def seed_generator(seed: int | None) -> torch.Generator | None:
         torch.Generator on CPU (diffusers moves it to the right device),
         or None if seed is None.
 
+    CAVEAT: that device handling only applies when you hand the generator to
+    a diffusers pipeline. Raw torch calls do NOT move it for you --
+    torch.randn(..., generator=g, device="cuda") with a CPU generator raises
+    "Expected a 'cuda' device type for generator but found 'cpu'". Generate
+    on CPU and .to(device) instead.
+
     Example:
         >>> generator = seed_generator(42)
         >>> image = pipe(prompt, generator=generator).images[0]
