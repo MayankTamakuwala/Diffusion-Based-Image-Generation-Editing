@@ -134,6 +134,7 @@ def load_pipelines(
     model_id: str = "runwayml/stable-diffusion-v1-5",
     controlnet_id: str = "lllyasviel/sd-controlnet-canny",
     lora_path: Optional[str] = None,
+    lora_scale: float = 0.6,
     enable_xformers: bool = True,
     enable_torch_compile: bool = False,
     smoke_test: bool = False,
@@ -147,6 +148,9 @@ def load_pipelines(
         model_id: Base SD model.
         controlnet_id: ControlNet checkpoint.
         lora_path: Optional LoRA adapter path.
+        lora_scale: Adapter strength. Defaults to 0.6, the value chosen by
+            matched-seed sweep -- full strength dissolves composition in
+            complex scenes. See config/eval_config.yaml.
         enable_xformers: Enable xformers attention.
         enable_torch_compile: Compile UNet.
         smoke_test: If True, skip warmup on GPU.
@@ -167,6 +171,7 @@ def load_pipelines(
     _pipelines["txt2img"] = load_txt2img_pipeline(
         model_id=model_id,
         lora_weights_path=lora_path,
+        lora_scale=lora_scale,
         enable_xformers=enable_xformers,
         enable_torch_compile=enable_torch_compile,
     )
@@ -183,6 +188,7 @@ def load_pipelines(
     _pipelines["img2img"] = load_img2img_pipeline(
         model_id=model_id,
         lora_weights_path=lora_path,
+        lora_scale=lora_scale,
         enable_xformers=enable_xformers,
     )
     t_img2img = time.perf_counter() - t1
@@ -195,6 +201,7 @@ def load_pipelines(
         base_model_id=model_id,
         controlnet_model_id=controlnet_id,
         lora_weights_path=lora_path,
+        lora_scale=lora_scale,
         enable_xformers=enable_xformers,
     )
     t_controlnet = time.perf_counter() - t2
