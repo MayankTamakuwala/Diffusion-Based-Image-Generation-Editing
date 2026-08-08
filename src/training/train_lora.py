@@ -100,6 +100,22 @@ def parse_args() -> argparse.Namespace:
         choices=["tensorboard", "wandb", "none"],
         help="Override config's report_to setting",
     )
+    # These two exist so you can sweep training length without editing the
+    # config, and -- importantly -- without overwriting a previously trained
+    # adapter you still need as a comparison point.
+    parser.add_argument(
+        "--num_train_epochs",
+        type=int,
+        default=None,
+        help="Override config's training.num_train_epochs",
+    )
+    parser.add_argument(
+        "--output_dir",
+        type=str,
+        default=None,
+        help="Override config's training.output_dir. Use a distinct directory "
+             "per run, or a retrain will clobber the previous adapter.",
+    )
     return parser.parse_args()
 
 
@@ -655,8 +671,16 @@ def main():
 
     if args.report_to:
         config.logging.report_to = args.report_to
+    if args.num_train_epochs:
+        config.training.num_train_epochs = args.num_train_epochs
+    if args.output_dir:
+        config.training.output_dir = args.output_dir
 
     logger.info(f"Config loaded from: {args.config}")
+    logger.info(
+        f"Epochs: {config.training.num_train_epochs} | "
+        f"Output: {config.training.output_dir}"
+    )
     logger.info(f"Training with LoRA rank={config.lora.rank} on {config.model.pretrained_model_name_or_path}")
 
     train(config, smoke_test=args.smoke_test)
