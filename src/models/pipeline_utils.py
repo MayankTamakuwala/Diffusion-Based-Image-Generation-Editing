@@ -235,7 +235,25 @@ def load_lora_into_pipeline(
         lora_scale: Multiplier on the adapter's contribution, 0.0-1.0+.
     """
     lora_path = Path(lora_weights_path)
-    is_peft_adapter = (lora_path / "adapter_config.json").exists()
+
+    # Accept either a local directory or a Hub repo id ("user/model"). PEFT's
+    # from_pretrained resolves both, so the only question is which format the
+    # adapter is in -- answered by whether adapter_config.json is present.
+    if lora_path.exists():
+        is_peft_adapter = (lora_path / "adapter_config.json").exists()
+    else:
+        from huggingface_hub import file_exists, repo_exists
+
+        # Check the repo separately: file_exists() returns False for a missing
+        # repo rather than raising, so without this a typo'd repo id would fall
+        # through to the diffusers branch and fail with an unrelated error.
+        if not repo_exists(str(lora_weights_path)):
+            raise FileNotFoundError(
+                f"'{lora_weights_path}' is neither a local directory nor an "
+                f"accessible Hub repo. Check the path, or the repo id and your "
+                f"access to it if it is private."
+            )
+        is_peft_adapter = file_exists(str(lora_weights_path), "adapter_config.json")
 
     if is_peft_adapter:
         from peft import PeftModel
@@ -306,7 +324,9 @@ def load_txt2img_pipeline(
     pipe = pipe.to(resolved_device)
 
     # Load LoRA weights if provided
-    if lora_weights_path and Path(lora_weights_path).exists():
+    # No .exists() guard: a Hub repo id is not a local path, and silently
+    # skipping the adapter would hand back base-model output with no error.
+    if lora_weights_path:
         load_lora_into_pipeline(pipe, lora_weights_path, lora_scale=lora_scale)
 
     set_scheduler(pipe, scheduler_name)
@@ -348,7 +368,9 @@ def load_img2img_pipeline(
     )
     pipe = pipe.to(resolved_device)
 
-    if lora_weights_path and Path(lora_weights_path).exists():
+    # No .exists() guard: a Hub repo id is not a local path, and silently
+    # skipping the adapter would hand back base-model output with no error.
+    if lora_weights_path:
         load_lora_into_pipeline(pipe, lora_weights_path, lora_scale=lora_scale)
 
     set_scheduler(pipe, scheduler_name)
@@ -411,7 +433,9 @@ def load_controlnet_pipeline(
     )
     pipe = pipe.to(resolved_device)
 
-    if lora_weights_path and Path(lora_weights_path).exists():
+    # No .exists() guard: a Hub repo id is not a local path, and silently
+    # skipping the adapter would hand back base-model output with no error.
+    if lora_weights_path:
         load_lora_into_pipeline(pipe, lora_weights_path, lora_scale=lora_scale)
 
     set_scheduler(pipe, scheduler_name)

@@ -43,6 +43,7 @@ import sys as _sys
 from pathlib import Path as _Path
 _sys.path.insert(0, str(_Path(__file__).resolve().parents[1]))
 
+from src.utils.adapter_utils import sanitize_adapter_config
 from src.utils.logging_utils import get_logger, setup_logging
 
 logger = get_logger(__name__)
@@ -302,6 +303,11 @@ def push_adapter(
 
     size_mb = sum(p.stat().st_size for p in adapter_path.iterdir() if p.is_file()) / 1e6
     logger.info(f"Adapter: {adapter_path} ({size_mb:.1f} MB)")
+
+    # The Hub validates adapter_config.json and shows a warning banner for
+    # each null field, so clean it up before it becomes the first thing a
+    # visitor sees.
+    sanitize_adapter_config(adapter_path, base_model=base_model)
 
     metrics = collect_metrics(adapter_path, lora_scale=lora_scale)
     card = build_model_card(repo_id, metrics, base_model, lora_scale, github_url)
