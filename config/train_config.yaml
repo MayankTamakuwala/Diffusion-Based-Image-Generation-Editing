@@ -43,6 +43,10 @@ dataset:
   center_crop: true       # crop to resolution (vs. random crop)
   random_flip: true       # horizontal flip augmentation
   fallback_caption: "a high quality photo"  # if no caption file found
+  # DataLoader worker processes. Each worker forks AFTER the SD weights are
+  # already resident, so every worker costs real host RAM (not just CPU).
+  # 4 fits a 20GB / 4-CPU job; drop to 2 if you land on a smaller allocation.
+  num_workers: 4
 
 # ── HuggingFace Dataset (WikiArt) ────────────────────────────
 # Set enabled: true to train on huggan/wikiart instead of local files.
@@ -84,8 +88,10 @@ training:
   max_grad_norm: 1.0
 
   # Precision / Memory
-  mixed_precision: "fp16"  # "fp16" | "bf16" | "no"
-  # Note: bf16 is more numerically stable but requires Ampere GPU (RTX 30xx+)
+  mixed_precision: "bf16"  # "fp16" | "bf16" | "no"
+  # bf16 is more numerically stable than fp16 (no loss-scaling blowups) and
+  # requires Ampere or newer. Set for H200 (Hopper, sm_90).
+  # Fall back to "fp16" on V100/P100, or "no" on CPU/MPS.
 
 # ── Saving & Checkpointing ───────────────────────────────────
 checkpointing:
