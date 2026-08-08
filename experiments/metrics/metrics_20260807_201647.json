@@ -1,0 +1,62 @@
+{
+  "timestamp": "2026-08-07T20:09:33.943094",
+  "smoke_test": false,
+  "model_info": {
+    "base_model": "runwayml/stable-diffusion-v1-5",
+    "lora_path": "lora_weights/final_lora_adapter",
+    "num_inference_steps": 30,
+    "guidance_scale": 7.5,
+    "scheduler": "DPMSolverMultistepScheduler"
+  },
+  "config": {
+    "model": {
+      "base_model": "runwayml/stable-diffusion-v1-5",
+      "lora_weights_path": "lora_weights/final_lora_adapter"
+    },
+    "eval_data": {
+      "val_dir": "dataset/wikiart_val"
+    },
+    "generation": {
+      "num_images": 1000,
+      "batch_size": 4,
+      "num_inference_steps": 30,
+      "guidance_scale": 7.5,
+      "width": 512,
+      "height": 512,
+      "seed": 0,
+      "scheduler": "DPMSolverMultistepScheduler",
+      "output_dir": "experiments/eval_generated_lora"
+    },
+    "fid": {
+      "real_images_dir": "dataset/wikiart_val/images",
+      "generated_images_dir": "experiments/eval_generated",
+      "mode": "clean",
+      "model_name": "inception_v3"
+    },
+    "clip": {
+      "model_name": "ViT-B/32",
+      "pretrained": "openai",
+      "batch_size": 32
+    },
+    "smoke_test": {
+      "num_images": 4,
+      "batch_size": 2
+    },
+    "output": {
+      "metrics_dir": "experiments/metrics"
+    }
+  },
+  "metrics": {
+    "fid": 102.5501,
+    "clip_mean": 0.3037,
+    "clip_std": 0.0243,
+    "clip_min": 0.2068,
+    "clip_max": 0.3734,
+    "clip_n_pairs": 1000
+  },
+  "runtime": {
+    "generation_s": 381.38,
+    "fid_s": 28.34,
+    "clip_s": 20.1
+  }
+}
