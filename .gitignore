@@ -52,6 +52,10 @@ experiments/samples/*.jpg
 experiments/latency/*.json
 experiments/latency/*.csv
 
+# JupyterLab writes these next to any file opened in its browser; on the
+# cluster that means byte-identical 10MB copies of every grid image.
+.ipynb_checkpoints/
+
 # Bulk eval renders: 1000 images per arm, regenerate with run_eval.py.
 # Committing these would add ~1GB and they carry no information the
 # metrics JSON doesn't already summarise.

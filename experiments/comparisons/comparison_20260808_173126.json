@@ -1,0 +1,28 @@
+{
+  "timestamp": "2026-08-08T17:17:58.735688",
+  "base_model": "runwayml/stable-diffusion-v1-5",
+  "lora_path": "lora_weights/final_lora_adapter",
+  "lora_scale": 0.6,
+  "metrics": {
+    "base": {
+      "fid": 106.502,
+      "clip_mean": 0.3141,
+      "clip_std": 0.0226,
+      "clip_min": 0.2338,
+      "clip_max": 0.3774,
+      "clip_n_pairs": 1000
+    },
+    "lora": {
+      "fid": 100.379,
+      "clip_mean": 0.3092,
+      "clip_std": 0.0236,
+      "clip_min": 0.2152,
+      "clip_max": 0.38,
+      "clip_n_pairs": 1000
+    },
+    "delta": {
+      "fid": -6.123,
+      "clip_mean": -0.0049
+    }
+  }
+}

@@ -1,0 +1,5 @@
+columns: base, scale 0.4, scale 0.6, scale 0.8, scale 1
+row 0: an Impressionism painting, landscape, by Claude Monet
+row 1: an Impressionism painting, genre painting, by Pierre Auguste Renoir
+row 2: an Impressionism painting, portrait, by John Singer Sargent
+row 3: an Impressionism painting, cityscape, by Childe Hassam
