@@ -1,0 +1,25 @@
+{
+  "timestamp": "2026-08-07T20:01:29.569064",
+  "base_model": "runwayml/stable-diffusion-v1-5",
+  "lora_path": "lora_weights/final_lora_adapter",
+  "visual": {
+    "grid": "experiments/comparisons/base_vs_lora_20260807_200201.png",
+    "prompts": [
+      "an Impressionism painting, landscape, by Claude Monet",
+      "an Impressionism painting, genre painting, by Pierre Auguste Renoir",
+      "an Impressionism painting, portrait, by John Singer Sargent",
+      "an Impressionism painting, cityscape, by Childe Hassam",
+      "an Impressionism painting, Unknown Genre, by Unknown Artist",
+      "an Impressionism painting, genre painting, by Eugene Boudin"
+    ],
+    "seeds": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5
+    ],
+    "num_pairs": 6
+  }
+}

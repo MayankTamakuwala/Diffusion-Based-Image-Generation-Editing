@@ -52,7 +52,21 @@ experiments/samples/*.jpg
 experiments/latency/*.json
 experiments/latency/*.csv
 
-# Keep metrics JSON
+# Bulk eval renders: 1000 images per arm, regenerate with run_eval.py.
+# Committing these would add ~1GB and they carry no information the
+# metrics JSON doesn't already summarise.
+experiments/eval_generated*/
+
+# Per-pair frames from the comparison script. The composed grid is the
+# artifact worth keeping; these are its raw inputs.
+experiments/comparisons/pair_*.png
+
+# Also exported to disk from the HF cache, and regenerable:
+#   python src/data/export_wikiart_val.py
+dataset/wikiart_val/
+
+# Keep metrics JSON, and the composed comparison grids they refer to --
+# these are the evaluation results worth version-controlling.
 !experiments/metrics/*.json
 
 # Wandb

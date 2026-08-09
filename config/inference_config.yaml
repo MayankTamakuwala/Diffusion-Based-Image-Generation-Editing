@@ -9,6 +9,11 @@ model:
   controlnet_model: "lllyasviel/sd-controlnet-canny"
   # Official Canny ControlNet for SD1.5 from lllyasviel (the ControlNet author)
   lora_weights_path: null   # path to LoRA adapter dir, or null to skip
+  # Adapter strength when a LoRA is loaded. 0.6 chosen by matched-seed sweep:
+  # composition collapses between 0.6 and 0.8 on complex scenes, while at 0.6
+  # FID and CLIP are both better than at full strength (100.38 / 0.3092 vs
+  # 102.55 / 0.3037). See config/eval_config.yaml for the full numbers.
+  lora_scale: 0.6
 
 # ── Performance / Precision ──────────────────────────────────
 performance:

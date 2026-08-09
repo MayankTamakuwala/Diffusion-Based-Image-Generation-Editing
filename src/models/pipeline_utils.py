@@ -188,7 +188,11 @@ def set_scheduler(pipe, scheduler_name: str) -> None:
     logger.debug(f"Scheduler set to: {scheduler_name}")
 
 
-def load_lora_into_pipeline(pipe, lora_weights_path: str | Path) -> None:
+def load_lora_into_pipeline(
+    pipe,
+    lora_weights_path: str | Path,
+    lora_scale: float = 1.0,
+) -> None:
     """
     Attach LoRA weights to a pipeline, handling both on-disk formats.
 
@@ -213,9 +217,22 @@ def load_lora_into_pipeline(pipe, lora_weights_path: str | Path) -> None:
       The trade-off is you can no longer toggle the adapter off -- fine here,
       since comparing base vs LoRA means loading two separate pipelines.
 
+    WHAT lora_scale DOES:
+      A LoRA contributes ΔW = (alpha/rank) · B·A to each adapted weight.
+      lora_scale multiplies that contribution before it is merged, so:
+          1.0 = full strength, exactly as trained (the default)
+          0.7 = 70% of the learned delta
+          0.0 = base model, adapter has no effect
+      This is NOT a substitute for training properly, but a style adapter
+      trained to convergence is often too strong at 1.0: it imposes the
+      dataset's palette and brushwork so hard that structural detail
+      dissolves. Dialling it to 0.6-0.8 usually keeps the style while
+      restoring composition. Cheap to sweep, so sweep it before retraining.
+
     Args:
         pipe: Any diffusers pipeline with a .unet attribute.
         lora_weights_path: Directory holding the adapter.
+        lora_scale: Multiplier on the adapter's contribution, 0.0-1.0+.
     """
     lora_path = Path(lora_weights_path)
     is_peft_adapter = (lora_path / "adapter_config.json").exists()
@@ -223,18 +240,37 @@ def load_lora_into_pipeline(pipe, lora_weights_path: str | Path) -> None:
     if is_peft_adapter:
         from peft import PeftModel
 
-        logger.info(f"Loading PEFT adapter from: {lora_path}")
+        logger.info(f"Loading PEFT adapter from: {lora_path} (scale={lora_scale})")
         peft_unet = PeftModel.from_pretrained(pipe.unet, str(lora_path))
+
+        if lora_scale != 1.0:
+            # PEFT stores the alpha/rank factor per adapter on each injected
+            # layer. Scaling it here means merge_and_unload() folds in the
+            # already-attenuated delta, so there is no runtime cost.
+            n_scaled = 0
+            for module in peft_unet.modules():
+                if hasattr(module, "scaling") and isinstance(module.scaling, dict):
+                    for adapter_name in module.scaling:
+                        module.scaling[adapter_name] *= lora_scale
+                        n_scaled += 1
+            logger.info(f"Scaled {n_scaled} LoRA layers by {lora_scale}")
+
         pipe.unet = peft_unet.merge_and_unload()
         logger.info("PEFT adapter merged into UNet")
     else:
         logger.info(f"Loading diffusers-format LoRA from: {lora_path}")
         pipe.load_lora_weights(str(lora_path))
+        if lora_scale != 1.0:
+            # Diffusers-format adapters stay unmerged, so strength is applied
+            # per-call via cross_attention_kwargs rather than baked in.
+            pipe.set_adapters(["default_0"], adapter_weights=[lora_scale])
+            logger.info(f"Set diffusers adapter weight to {lora_scale}")
 
 
 def load_txt2img_pipeline(
     model_id: str = "runwayml/stable-diffusion-v1-5",
     lora_weights_path: Optional[str] = None,
+    lora_scale: float = 1.0,
     scheduler_name: str = "DPMSolverMultistepScheduler",
     device: str = "auto",
     dtype: str = "auto",
@@ -271,7 +307,7 @@ def load_txt2img_pipeline(
 
     # Load LoRA weights if provided
     if lora_weights_path and Path(lora_weights_path).exists():
-        load_lora_into_pipeline(pipe, lora_weights_path)
+        load_lora_into_pipeline(pipe, lora_weights_path, lora_scale=lora_scale)
 
     set_scheduler(pipe, scheduler_name)
     apply_optimizations(
@@ -288,6 +324,7 @@ def load_txt2img_pipeline(
 def load_img2img_pipeline(
     model_id: str = "runwayml/stable-diffusion-v1-5",
     lora_weights_path: Optional[str] = None,
+    lora_scale: float = 1.0,
     scheduler_name: str = "DPMSolverMultistepScheduler",
     device: str = "auto",
     dtype: str = "auto",
@@ -312,7 +349,7 @@ def load_img2img_pipeline(
     pipe = pipe.to(resolved_device)
 
     if lora_weights_path and Path(lora_weights_path).exists():
-        load_lora_into_pipeline(pipe, lora_weights_path)
+        load_lora_into_pipeline(pipe, lora_weights_path, lora_scale=lora_scale)
 
     set_scheduler(pipe, scheduler_name)
     apply_optimizations(pipe, resolved_device, enable_xformers=enable_xformers, vae_slicing=vae_slicing)
@@ -325,6 +362,7 @@ def load_controlnet_pipeline(
     base_model_id: str = "runwayml/stable-diffusion-v1-5",
     controlnet_model_id: str = "lllyasviel/sd-controlnet-canny",
     lora_weights_path: Optional[str] = None,
+    lora_scale: float = 1.0,
     scheduler_name: str = "DPMSolverMultistepScheduler",
     device: str = "auto",
     dtype: str = "auto",
@@ -374,7 +412,7 @@ def load_controlnet_pipeline(
     pipe = pipe.to(resolved_device)
 
     if lora_weights_path and Path(lora_weights_path).exists():
-        load_lora_into_pipeline(pipe, lora_weights_path)
+        load_lora_into_pipeline(pipe, lora_weights_path, lora_scale=lora_scale)
 
     set_scheduler(pipe, scheduler_name)
     apply_optimizations(pipe, resolved_device, enable_xformers=enable_xformers, vae_slicing=vae_slicing)
