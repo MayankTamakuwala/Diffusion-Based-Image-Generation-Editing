@@ -74,6 +74,7 @@ from pathlib import Path as _Path
 _sys.path.insert(0, str(_Path(__file__).resolve().parents[2]))
 
 from src.data.dataset import get_dataloader, get_wikiart_dataloader
+from src.utils.adapter_utils import sanitize_adapter_config
 from src.utils.logging_utils import get_logger, setup_logging, get_timestamped_filename
 from src.utils.seed_utils import seed_everything, seed_generator
 
@@ -609,6 +610,9 @@ def train(config: OmegaConf, smoke_test: bool = False) -> None:
         unwrapped_unet = accelerator.unwrap_model(unet)
         final_save_path = output_dir / "final_lora_adapter"
         unwrapped_unet.save_pretrained(final_save_path)
+        # PEFT leaves base_model_name_or_path and task_type null for a
+        # diffusers UNet, which the Hub flags as config warnings.
+        sanitize_adapter_config(final_save_path, base_model=model_id)
         logger.info(f"Final LoRA adapter saved to: {final_save_path}")
 
     accelerator.end_training()

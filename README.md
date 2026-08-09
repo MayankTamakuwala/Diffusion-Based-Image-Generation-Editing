@@ -32,6 +32,93 @@ See `docs/architecture.md` for full ASCII system diagrams.
 
 ---
 
+## Try the Trained Model
+
+A LoRA adapter fine-tuned on 5,000 WikiArt Impressionism paintings is published
+on the Hub, so you can generate without training anything. It's 12.8 MB.
+
+**[MayankTamakuwala/sd15-wikiart-impressionism-lora](https://huggingface.co/MayankTamakuwala/sd15-wikiart-impressionism-lora)**
+
+```bash
+pip install torch diffusers transformers peft accelerate
+```
+
+```python
+import torch
+from diffusers import StableDiffusionPipeline
+from peft import PeftModel
+
+pipe = StableDiffusionPipeline.from_pretrained(
+    "runwayml/stable-diffusion-v1-5",
+    torch_dtype=torch.float16,
+    safety_checker=None,
+)
+
+# Merge at 0.6 strength -- see below for why not 1.0
+peft_unet = PeftModel.from_pretrained(
+    pipe.unet, "MayankTamakuwala/sd15-wikiart-impressionism-lora"
+)
+for module in peft_unet.modules():
+    if hasattr(module, "scaling") and isinstance(module.scaling, dict):
+        for name in module.scaling:
+            module.scaling[name] *= 0.6
+pipe.unet = peft_unet.merge_and_unload()
+pipe = pipe.to("cuda")
+
+pipe("an Impressionism painting, landscape, by Claude Monet").images[0].save("out.png")
+```
+
+Or through this repo's pipeline loader, which handles the format detection and
+scaling for you:
+
+```python
+from src.models.pipeline_utils import load_txt2img_pipeline
+
+pipe = load_txt2img_pipeline(
+    lora_weights_path="MayankTamakuwala/sd15-wikiart-impressionism-lora",
+    lora_scale=0.6,
+)
+```
+
+### Use 0.6 strength, not 1.0
+
+At full strength the adapter imposes palette and brushwork hard enough to
+dissolve composition in complex multi-figure scenes. A matched-seed sweep put
+the breakdown between 0.6 and 0.8, and 0.6 measures better on **both** metrics:
+
+| Model | FID ↓ | CLIP ↑ |
+|---|---|---|
+| Base SD 1.5 | 106.50 | 0.3141 |
+| + LoRA @ 1.0 | 102.55 | 0.3037 |
+| **+ LoRA @ 0.6** | **100.38** | **0.3092** |
+
+1,000 generated images against 653 held-out WikiArt images the model never saw.
+Reproduce with:
+
+```bash
+python src/data/export_wikiart_val.py --num_images 1000
+python src/evaluation/compare_base_vs_lora.py \
+    --lora_path lora_weights/final_lora_adapter --lora_scale 0.6 --metrics
+```
+
+The absolute FID is inflated by the small reference set (653 images, under the
+~1000 where FID stabilises). The *delta* against base is the meaningful figure.
+
+### What the fine-tuning actually changed
+
+Two effects are attributable to the adapter, since neither is prompted and
+neither appears in base output at matched seeds:
+
+- **Picture frames disappear.** Base SD renders "a painting" as a photograph of
+  a *framed* painting on a wall. WikiArt images are cropped to the canvas, so
+  the adapter produces edge-to-edge artwork.
+- **Colour shifts toward photographed paintings** — the muted, slightly aged
+  palette of real scans, away from SD's idealised saturation.
+
+See `experiments/comparisons/` for the side-by-side grids.
+
+---
+
 ## Quick Start
 
 ### 1. Environment Setup
